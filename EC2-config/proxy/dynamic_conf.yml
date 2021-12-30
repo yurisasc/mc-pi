@@ -1,0 +1,24 @@
+tcp:
+  routers:
+    mc-java:
+      rule: HostSNI(`*`)
+      service: mc-java
+      entryPoints:
+        - mc-java
+  services:
+    mc-java
+      loadBalancer:
+        servers:
+          - address: "10.20.4.2:25565"
+
+udp:
+  routers:
+    mc-bedrock:
+      service: mc-bedrock
+      entryPoints:
+        - mc-bedrock
+  services:
+    mc-bedrock
+      loadBalancer:
+        servers:
+          - address: "10.20.4.2:19132"

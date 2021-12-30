@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  proxy:
+    image: traefik:v2.5.4
+    container_name: proxy
+    network_mode: host
+    ports:
+      - 80:80
+      - 8080:8080
+      - 25565:25565
+      - 19132:19132/udp
+    volumes:
+      - ./:etc/traefik

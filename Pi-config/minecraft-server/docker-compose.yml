@@ -1,0 +1,26 @@
+version: '3'
+
+services:
+  minecraft-server:
+    image: itzg/minecraft-server
+    container_name: minecraft-server
+    network_mode: host
+    environment:
+      MEMORY: 6G
+      EULA: "TRUE"
+      WHITELIST: "FALSE"
+      OPS: "Vostox"
+      DIFFICULTY: "normal"
+      ENABLE_ROLLING_LOGS: "false"
+      MODE: "survival"
+      LEVEL_TYPE: "DEFAULT"
+      MAX_PLAYERS: 20
+      TYPE: "FABRIC"
+      ONLINE_MODE: "FALSE"
+      MOTD: "Cakranegara - Mods List: bit.ly/InstalledMods"
+      VIEW_DISTANCE: 10
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    volumes:
+      - ./minecraft-data:/data

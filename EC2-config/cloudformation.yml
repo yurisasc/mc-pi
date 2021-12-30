@@ -1,0 +1,395 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Minecraft VPS to connect to Raspberry Pi
+
+Parameters:
+  AMI:
+    Description: AWS AMI ID
+    Type: String
+    Default: ami-05654370f5b5eb0b0
+  ServerState:
+    Type: String
+    Description: "Running: A spot instance will launch shortly after setting this parameter; your Minecraft server should start within 5-10 minutes of changing this parameter (once UPDATE_IN_PROGRESS becomes UPDATE_COMPLETE). Stopped: Your spot instance (and thus Minecraft container) will be terminated shortly after setting this parameter."
+    Default: Running
+    AllowedValues: 
+    - Running
+    - Stopped
+  InstanceType:
+    Type: String
+    Description: "t1.micro should be enough to serve"
+    Default: t1.micro
+  SpotPrice:
+    Type: String
+    Description: "The maximum price you are willing to pay for a spot instance. This is the maximum price you will pay for a spot instance. The price is in US dollars."
+    Default: 0.0027
+  KeyPairName:
+    Type: String
+    Description: (Optional - An empty value disables this feature)
+    Default: ''
+  YourIPv4:
+    Type: String
+    Description: (Optional - An empty value disables this feature)
+    Default: ''
+  YourIPv6:
+    Type: String
+    Description: (Optional - An empty value disables this feature)
+    Default: ''
+  HostedZoneId:
+    Type: String
+    Description: (Optional - An empty value disables this feature) If you have a hosted zone in Route 53 and wish to set a DNS record whenever your Minecraft instance starts, supply the hosted zone ID here.
+    Default: ''
+  RecordName:
+    Type: String
+    Description: (Optional - An empty value disables this feature) If you have a hosted zone in Route 53 and wish to set a DNS record whenever your Minecraft instance starts, supply the name of the record here (e.g. minecraft.mydomain.com).
+    Default: ''
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPS Configuration
+        Parameters:
+          - ServerState
+          - InstanceType
+          - SpotPrice
+      - Label:
+          default: SSH Configuration
+        Parameters:
+          - KeyPairName
+          - YourIPv4
+          - YourIPv6
+      - Label: 
+          default: DNS Configuration
+        Parameters:
+          - HostedZoneId
+          - RecordName
+    ParameterLabels:
+      ServerState:
+        Label: Update this parameter to shut down / start up your Minecraft server as required to save on cost. Takes a few minutes to take effect.
+      InstanceType:
+        Label: Which instance type? You must make sure this is available in your region! https://aws.amazon.com/ec2/pricing/on-demand/
+      SpotPrice:
+        Label: Maximum spot price per hour? Leave blank to disable spot pricing.
+      YourIPv4:
+        Label: If you wish to access the instance via SSH and using IPv4, provide it.
+      YourIPv6:
+        Label: "If you wish to access the instance via SSH and using IPv6, provide it."
+      KeyPairName:
+        Label: If you wish to access the instance via SSH, select a Key Pair to use. https://console.aws.amazon.com/ec2/v2/home?#KeyPairs:sort=keyName
+      HostedZoneId:
+        Label: If you have a hosted zone in Route 53 and wish to update a DNS record whenever your Minecraft instance starts, supply the hosted zone ID here.
+      RecordName:
+        Label: If you have a hosted zone in Route 53 and wish to set a DNS record whenever your Minecraft instance starts, supply a record name here (e.g. minecraft.mydomain.com).
+
+Conditions:
+  SpotPriceProvided: !Not [ !Equals [ !Ref SpotPrice, '' ] ]
+  IPv4AddressProvided: !Not [ !Equals [ !Ref YourIPv4, '' ] ]
+  IPv6AddressProvided: !Not [ !Equals [ !Ref YourIPv6, '' ] ]
+  KeyPairNameProvided: !Not [ !Equals [ !Ref KeyPairName, '' ] ]
+  DnsConfigEnabled: !And [ !Not [ !Equals [ !Ref HostedZoneId, '' ] ], !Not [ !Equals [ !Ref RecordName, '' ] ] ]
+
+Mappings:
+  ServerState:
+    Running:
+      DesiredCapacity: 1
+    Stopped:
+      DesiredCapacity: 0
+
+Resources:
+
+  # ====================================================
+  # BASIC VPC
+  # ====================================================
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.100.0.0/26
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+  
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select 
+      - 0
+      - !GetAZs 
+        Ref: 'AWS::Region'
+      CidrBlock: !Select [ 0, !Cidr [ 10.100.0.0/26, 4, 4 ] ]
+      VpcId: !Ref Vpc  
+
+  SubnetARoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetA
+
+  SubnetBRoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetB  
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select 
+      - 1
+      - !GetAZs 
+        Ref: 'AWS::Region'
+      CidrBlock: !Select [ 1, !Cidr [ 10.100.0.0/26, 4, 4 ] ]
+      VpcId: !Ref Vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties: {}
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref Vpc    
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties: 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTable
+
+  # ====================================================
+  # INSTANCE CONFIG
+  # ====================================================
+  Ec2Sg:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub "${AWS::StackName}-ec2"
+      GroupDescription: !Sub "${AWS::StackName}-ec2"
+      SecurityGroupIngress:
+      - !If
+        - IPv4AddressProvided 
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          CidrIp: !Sub "${YourIPv4}/32"
+        - !Ref 'AWS::NoValue'
+      - !If
+        - IPv6AddressProvided 
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          CidrIpv6: !Sub "${YourIPv6}/128"
+        - !Ref 'AWS::NoValue'
+      - FromPort: 25565
+        ToPort: 25565
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      - FromPort: 19132
+        ToPort: 19132
+        IpProtocol: udp
+        CidrIp: 0.0.0.0/0
+      - FromPort: 51820
+        ToPort: 51820
+        IpProtocol: udp
+        CidrIp: 0.0.0.0/0
+      - FromPort: 9090
+        ToPort: 9090
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      - FromPort: 8000
+        ToPort: 8000
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      - FromPort: 8080
+        ToPort: 8080
+        IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref Vpc
+  
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceType
+      KeyName: 
+        !If [ KeyPairNameProvided, !Ref KeyPairName, !Ref 'AWS::NoValue' ]
+      SecurityGroups:
+      - !Ref Ec2Sg
+      SpotPrice: !If [ SpotPriceProvided, !Ref SpotPrice, !Ref 'AWS::NoValue' ]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          sudo apt update
+          sudo apt install wireguard resolvconf docker.io docker-compose -y
+          
+          # Wireguard configuration
+          (umask 077 && printf "[Interface]\nPrivateKey = " | sudo tee /etc/wireguard/wg0.conf > /dev/null)
+          wg genkey | sudo tee -a /etc/wireguard/wg0.conf | wg pubkey | sudo tee /etc/wireguard/publickey
+          sudo echo "ListenPort = 51820" >> /etc/wireguard/wg0.conf
+          sudo echo "Address = 10.20.4.1/24" >> /etc/wireguard/wg0.conf
+          sudo echo "[Peer]" >> /etc/wireguard/wg0.conf
+          sudo echo "PublicKey = " >> /etc/wireguard/wg0.conf
+          sudo echo "AllowedIPs = 10.20.4.2/24" >> /etc/wireguard/wg0.conf
+
+          # Proxy configuration
+          sudo echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+          sudo sysctl -p
+          mkdir ~/proxy
+
+          # Firewall configuration
+          sudo ufw allow ssh
+          sudo ufw allow 51820/udp
+          sudo ufw allow 19132/udp
+          sudo ufw allow 25565
+          sudo ufw allow 8080
+          sudo ufw enable
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-asg"
+      DesiredCapacity: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MaxSize: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      MinSize: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Policies:
+        - PolicyName: root
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: "route53:*"
+                Resource: "*"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Roles:
+        - !Ref InstanceRole
+
+  # ====================================================
+  # SET DNS RECORD
+  # ====================================================
+  SetDNSRecordLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: DnsConfigEnabled
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - Effect: "Allow"
+                Action: "route53:*"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: "ec2:DescribeInstance*"
+                Resource: "*"
+
+  SetDNSRecordLambda:
+    Type: "AWS::Lambda::Function"
+    Condition: DnsConfigEnabled
+    Properties: 
+      Environment:
+        Variables:
+          HostedZoneId: !Ref HostedZoneId
+          RecordName: !Ref RecordName
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          def handler(event, context):
+            new_instance = boto3.resource('ec2').Instance(event['detail']['EC2InstanceId'])
+            boto3.client('route53').change_resource_record_sets(
+              HostedZoneId= os.environ['HostedZoneId'],
+              ChangeBatch={
+                  'Comment': 'updating',
+                  'Changes': [
+                      {
+                          'Action': 'UPSERT',
+                          'ResourceRecordSet': {
+                              'Name': os.environ['RecordName'],
+                              'Type': 'A',
+                              'TTL': 60,
+                              'ResourceRecords': [
+                                  {
+                                      'Value': new_instance.public_ip_address
+                                  },
+                              ]
+                          }
+                      },
+                  ]
+              })
+      Description: Sets Route 53 DNS Record for Minecraft
+      FunctionName: !Sub "${AWS::StackName}-set-dns"
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt SetDNSRecordLambdaRole.Arn
+      Runtime: python3.7
+      Timeout: 20
+
+  LaunchEvent:
+    Type: AWS::Events::Rule
+    Condition: DnsConfigEnabled
+    Properties: 
+      EventPattern:
+        source:
+        - aws.autoscaling
+        detail-type:
+        - EC2 Instance Launch Successful
+        detail:
+          AutoScalingGroupName:
+          - !Ref AutoScalingGroup
+      Name: !Sub "${AWS::StackName}-instance-launch"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SetDNSRecordLambda.Arn
+          Id: !Sub "${AWS::StackName}-set-dns"
+
+  LaunchEventLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: DnsConfigEnabled
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt SetDNSRecordLambda.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt LaunchEvent.Arn
+
+Outputs:
+  CheckInstanceIp:
+    Description: To find your Minecraft instance IP address, visit the following link. Click on the instance to find its Public IP address.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/ec2/v2/home?region=${AWS::Region}#Instances:tag:aws:autoscaling:groupName=${AutoScalingGroup};sort=tag:Name"
