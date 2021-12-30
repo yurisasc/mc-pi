@@ -233,13 +233,18 @@ Resources:
           sudo echo "ListenPort = 51820" >> /etc/wireguard/wg0.conf
           sudo echo "Address = 10.20.4.1/24" >> /etc/wireguard/wg0.conf
           sudo echo "[Peer]" >> /etc/wireguard/wg0.conf
-          sudo echo "PublicKey = " >> /etc/wireguard/wg0.conf
+          sudo echo "PublicKey = ri1KWFV1f1S4kSoXNJDIqGJOzuwDTPDjNypFksLmMVU=" >> /etc/wireguard/wg0.conf
           sudo echo "AllowedIPs = 10.20.4.2/24" >> /etc/wireguard/wg0.conf
+          wg-quick up wg0
 
           # Proxy configuration
           sudo echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
           sudo sysctl -p
           mkdir ~/proxy
+          wget https://raw.githubusercontent.com/yurisasc/mc-pi/master/EC2-config/proxy/docker-compose.yml -P ~/proxy
+          wget https://raw.githubusercontent.com/yurisasc/mc-pi/master/EC2-config/proxy/traefik.yml -P ~/proxy
+          wget https://raw.githubusercontent.com/yurisasc/mc-pi/master/EC2-config/proxy/dynamic_conf.yml -P ~/proxy
+          sudo docker-compose -f ~/proxy/docker-compose.yml up -d
 
           # Firewall configuration
           sudo ufw allow ssh
