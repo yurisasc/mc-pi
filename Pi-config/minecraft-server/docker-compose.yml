@@ -19,6 +19,7 @@ services:
       ONLINE_MODE: "FALSE"
       MOTD: "Cakranegara - Mods List: bit.ly/InstalledMods"
       VIEW_DISTANCE: 10
+      RESOURCE_PACK: "https://github.com/yurisasc/mc-pi/raw/master/Pi-config/minecraft-server/minecraft-data/resource-packs/latest.zip"
     tty: true
     stdin_open: true
     restart: unless-stopped
