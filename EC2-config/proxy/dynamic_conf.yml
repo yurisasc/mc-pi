@@ -6,7 +6,7 @@ tcp:
       entryPoints:
         - mc-java
   services:
-    mc-java
+    mc-java:
       loadBalancer:
         servers:
           - address: "10.20.4.2:25565"
@@ -18,7 +18,7 @@ udp:
       entryPoints:
         - mc-bedrock
   services:
-    mc-bedrock
+    mc-bedrock:
       loadBalancer:
         servers:
           - address: "10.20.4.2:19132"
